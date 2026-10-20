@@ -1,0 +1,46 @@
+services:
+  todo-mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  todo-backend:
+    build:
+      context: ./backend
+    image: todo-backend:local
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      PORT: "8000"
+      MONGO_URI: mongodb://todo-mongo:27017/todoapp
+    depends_on:
+      todo-mongo:
+        condition: service_healthy
+
+  todo-frontend:
+    build:
+      context: ./frontend
+    image: todo-frontend:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - todo-backend
+
+volumes:
+  mongo-data:
+    external: true
+    name: todo-mongo-data
