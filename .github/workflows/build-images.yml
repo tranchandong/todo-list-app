@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: todo-production
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,3 +47,111 @@ jobs:
         run: |
           docker push "tranchandong/todo-backend:$GITHUB_SHA"
           docker push "tranchandong/todo-frontend:$GITHUB_SHA"
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      SERVER_IP: "52.77.216.246"
+      SECURITY_GROUP_ID: "sg-069b75c25b97626ca"
+      AWS_REGION: ap-southeast-1
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Prepare SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/todo.pem
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/todo.pem ~/.ssh/known_hosts
+
+          cat > ~/.ssh/config <<EOF
+          Host todo-server
+            HostName $SERVER_IP
+            User ubuntu
+            IdentityFile ~/.ssh/todo.pem
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 10
+            ConnectionAttempts 6
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Allow SSH from this runner
+        run: |
+          RUNNER_IP=$(curl -4fsS --retry 3 https://checkip.amazonaws.com)
+          python3 -c 'import ipaddress, sys; ipaddress.IPv4Address(sys.argv[1])' "$RUNNER_IP"
+
+          RULE_ID=$(aws ec2 authorize-security-group-ingress \
+            --group-id "$SECURITY_GROUP_ID" \
+            --protocol tcp \
+            --port 22 \
+            --cidr "$RUNNER_IP/32" \
+            --query 'SecurityGroupRules[0].SecurityGroupRuleId' \
+            --output text)
+
+          echo "SSH_RULE_ID=$RULE_ID" >> "$GITHUB_ENV"
+
+      - name: Copy production Compose
+        run: |
+          scp docker-compose.prod.yml \
+            todo-server:/opt/todo-app/docker-compose.prod.yml
+
+      - name: Deploy images
+        run: |
+          ssh todo-server "bash -s -- '$GITHUB_SHA'" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/todo-app
+          export IMAGE_TAG="$1"
+
+          docker compose -p todo-app -f docker-compose.prod.yml config --quiet
+
+          docker compose -p todo-app -f docker-compose.prod.yml \
+            pull todo-backend todo-frontend
+
+          docker compose -p todo-app -f docker-compose.prod.yml \
+            up -d --no-deps --force-recreate todo-backend todo-frontend
+
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 5 --max-time 10 \
+            http://127.0.0.1:8080/ > /dev/null
+
+          docker compose -p todo-app -f docker-compose.prod.yml ps
+          REMOTE
+
+      - name: Check public HTTPS
+        run: |
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 5 --max-time 15 \
+            https://todo.dongtran.dev/ > /dev/null
+
+      - name: Remove temporary SSH access
+        if: always() && env.SSH_RULE_ID != ''
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id "$SECURITY_GROUP_ID" \
+            --security-group-rule-ids "$SSH_RULE_ID"
+
+      - name: Remove SSH files
+        if: always()
+        run: rm -f ~/.ssh/todo.pem ~/.ssh/known_hosts ~/.ssh/config
