@@ -35,3 +35,5 @@ crash.log
 # Private keys
 *.pem
 *.key
+
+ansible/files/backend.env

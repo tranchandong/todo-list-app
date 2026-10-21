@@ -1,0 +1,43 @@
+- name: Configure Nginx for Todo app
+  hosts: myhosts
+  become: true
+
+  tasks:
+    - name: Install Nginx and Certbot
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: true
+
+    - name: Copy Todo Nginx configuration
+      ansible.builtin.copy:
+        src: files/todo.dongtran.dev.conf
+        dest: /etc/nginx/sites-available/todo.dongtran.dev
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Enable Todo site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/todo.dongtran.dev
+        dest: /etc/nginx/sites-enabled/todo.dongtran.dev
+        state: link
+
+    - name: Validate Nginx configuration
+      ansible.builtin.command:
+        cmd: nginx -t
+      changed_when: false
+
+    - name: Ensure Nginx is running
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Reload Nginx configuration
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
