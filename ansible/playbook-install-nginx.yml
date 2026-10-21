@@ -2,6 +2,11 @@
   hosts: myhosts
   become: true
 
+  vars_prompt:
+    - name: certbot_email
+      prompt: Email for Let's Encrypt
+      private: false
+
   tasks:
     - name: Install Nginx and Certbot
       ansible.builtin.apt:
@@ -12,13 +17,19 @@
         state: present
         update_cache: true
 
-    - name: Copy Todo Nginx configuration
+    - name: Check existing certificate
+      ansible.builtin.stat:
+        path: /etc/letsencrypt/live/todo.dongtran.dev/fullchain.pem
+      register: todo_certificate
+
+    - name: Configure HTTP for first certificate
       ansible.builtin.copy:
-        src: files/todo.dongtran.dev.conf
+        src: files/todo-http.conf
         dest: /etc/nginx/sites-available/todo.dongtran.dev
         owner: root
         group: root
         mode: "0644"
+      when: not todo_certificate.stat.exists
 
     - name: Enable Todo site
       ansible.builtin.file:
@@ -26,7 +37,7 @@
         dest: /etc/nginx/sites-enabled/todo.dongtran.dev
         state: link
 
-    - name: Validate Nginx configuration
+    - name: Validate initial Nginx configuration
       ansible.builtin.command:
         cmd: nginx -t
       changed_when: false
@@ -37,7 +48,46 @@
         state: started
         enabled: true
 
+    - name: Load HTTP configuration for first certificate
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+      when: not todo_certificate.stat.exists
+
+    - name: Obtain and install HTTPS certificate
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - --nginx
+          - --non-interactive
+          - --agree-tos
+          - --email
+          - "{{ certbot_email }}"
+          - --domain
+          - todo.dongtran.dev
+          - --redirect
+      when: not todo_certificate.stat.exists
+
+    - name: Copy final HTTPS configuration
+      ansible.builtin.copy:
+        src: files/todo.dongtran.dev.conf
+        dest: /etc/nginx/sites-available/todo.dongtran.dev
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Validate HTTPS configuration
+      ansible.builtin.command:
+        cmd: nginx -t
+      changed_when: false
+
     - name: Reload Nginx configuration
       ansible.builtin.service:
         name: nginx
         state: reloaded
+
+    - name: Enable automatic certificate renewal
+      ansible.builtin.systemd_service:
+        name: certbot.timer
+        state: started
+        enabled: true
