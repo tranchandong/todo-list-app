@@ -1,0 +1,45 @@
+name: Build Docker images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_PASS: ${{ secrets.DOCKER_PASS }}
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        run: |
+          printf '%s' "$DOCKER_PASS" | docker login \
+            --username "$DOCKER_USER" \
+            --password-stdin
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -t "tranchandong/todo-backend:$GITHUB_SHA" \
+            ./backend
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            -t "tranchandong/todo-frontend:$GITHUB_SHA" \
+            ./frontend
+
+      - name: Push images
+        run: |
+          docker push "tranchandong/todo-backend:$GITHUB_SHA"
+          docker push "tranchandong/todo-frontend:$GITHUB_SHA"
