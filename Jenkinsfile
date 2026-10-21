@@ -68,6 +68,49 @@ pipeline {
                 }
             }
         }
+
+        stage('Deploy') {
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'todo-server-ssh',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+
+                        remote() {
+                            ssh -i "$SSH_KEY" \
+                              -o IdentitiesOnly=yes \
+                              -o BatchMode=yes \
+                              -o StrictHostKeyChecking=yes \
+                              -o UserKnownHostsFile=scripts/known_hosts \
+                              "$SSH_USER@127.0.0.1" "$@"
+                        }
+
+                        remote "mkdir -p /opt/todo-app/releases/$IMAGE_TAG"
+
+                        scp -i "$SSH_KEY" \
+                          -o IdentitiesOnly=yes \
+                          -o BatchMode=yes \
+                          -o StrictHostKeyChecking=yes \
+                          -o UserKnownHostsFile=scripts/known_hosts \
+                          docker-compose.prod.yml \
+                          "$SSH_USER@127.0.0.1:/opt/todo-app/releases/$IMAGE_TAG/docker-compose.prod.yml"
+
+                        remote "bash -s -- '$IMAGE_TAG'" < scripts/deploy.sh
+
+                        curl --fail --silent --show-error \
+                          --retry 5 --retry-delay 5 --retry-all-errors \
+                          --connect-timeout 5 --max-time 15 \
+                          https://todo.dongtran.dev/ > /dev/null
+                    '''
+                }
+            }
+        }
     }
 
     post {

@@ -112,31 +112,14 @@ jobs:
 
       - name: Copy production Compose
         run: |
+          ssh todo-server "mkdir -p /opt/todo-app/releases/$GITHUB_SHA"
+
           scp docker-compose.prod.yml \
-            todo-server:/opt/todo-app/docker-compose.prod.yml
+            "todo-server:/opt/todo-app/releases/$GITHUB_SHA/docker-compose.prod.yml"
 
       - name: Deploy images
         run: |
-          ssh todo-server "bash -s -- '$GITHUB_SHA'" <<'REMOTE'
-          set -euo pipefail
-          cd /opt/todo-app
-          export IMAGE_TAG="$1"
-
-          docker compose -p todo-app -f docker-compose.prod.yml config --quiet
-
-          docker compose -p todo-app -f docker-compose.prod.yml \
-            pull todo-backend todo-frontend
-
-          docker compose -p todo-app -f docker-compose.prod.yml \
-            up -d --no-deps --force-recreate todo-backend todo-frontend
-
-          curl --fail --silent --show-error \
-            --retry 12 --retry-delay 5 --retry-all-errors \
-            --connect-timeout 5 --max-time 10 \
-            http://127.0.0.1:8080/ > /dev/null
-
-          docker compose -p todo-app -f docker-compose.prod.yml ps
-          REMOTE
+          ssh todo-server "bash -s -- '$GITHUB_SHA'" < scripts/deploy.sh
 
       - name: Check public HTTPS
         run: |
