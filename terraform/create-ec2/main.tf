@@ -76,8 +76,8 @@ resource "aws_security_group" "terraform_sg" {
 }
 
 resource "aws_instance" "app_server" {
-  ami                         = data.aws_ami.ubuntu.id
-  instance_type               = "t3.small"
+  ami                         = "ami-0080f2c6aa4e378b7"
+  instance_type               = "c7i-flex.large"
   key_name                    = "todo-devops"
   subnet_id                   = sort(data.aws_subnets.default.ids)[0]
   associate_public_ip_address = true
@@ -94,10 +94,6 @@ resource "aws_instance" "app_server" {
 
   metadata_options {
     http_tokens = "required"
-  }
-
-  credit_specification {
-    cpu_credits = "standard"
   }
 
   tags = {
