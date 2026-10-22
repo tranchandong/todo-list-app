@@ -1,0 +1,33 @@
+- name: Deploy monitoring
+  hosts: myhosts
+  become: true
+
+  tasks:
+    - name: Create monitoring directory
+      ansible.builtin.file:
+        path: /opt/todo-monitoring
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Copy monitoring configuration
+      ansible.builtin.copy:
+        src: ../monitoring/
+        dest: /opt/todo-monitoring/
+        owner: ubuntu
+        group: ubuntu
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Validate monitoring Compose
+      ansible.builtin.command:
+        cmd: docker compose -p todo-monitoring config --quiet
+        chdir: /opt/todo-monitoring
+      changed_when: false
+
+    - name: Start monitoring services
+      ansible.builtin.command:
+        cmd: docker compose -p todo-monitoring up -d
+        chdir: /opt/todo-monitoring
+      changed_when: true
