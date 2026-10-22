@@ -101,8 +101,21 @@ resource "aws_instance" "app_server" {
   }
 }
 
+resource "aws_eip" "app_ip" {
+  domain = "vpc"
+
+  tags = {
+    Name = "todo-app-ip"
+  }
+}
+
+resource "aws_eip_association" "app_ip" {
+  instance_id   = aws_instance.app_server.id
+  allocation_id = aws_eip.app_ip.id
+}
+
 output "public_ip" {
-  value = aws_instance.app_server.public_ip
+  value = aws_eip.app_ip.public_ip
 }
 
 output "instance_id" {

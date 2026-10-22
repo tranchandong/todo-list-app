@@ -58,7 +58,7 @@ jobs:
       id-token: write
 
     env:
-      SERVER_IP: "56.10.13.244"
+      SERVER_IP: "52.74.113.41"
       SECURITY_GROUP_ID: "sg-069b75c25b97626ca"
       AWS_REGION: ap-southeast-1
 
