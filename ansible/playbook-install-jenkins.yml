@@ -1,0 +1,82 @@
+- name: Install Jenkins
+  hosts: myhosts
+  become: true
+
+  tasks:
+    - name: Install Java and required packages
+      ansible.builtin.apt:
+        name:
+          - fontconfig
+          - openjdk-21-jre
+          - ca-certificates
+          - git
+        state: present
+        update_cache: true
+
+    - name: Create APT keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Jenkins GPG key
+      ansible.builtin.get_url:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+        dest: /etc/apt/keyrings/jenkins-keyring.asc
+        mode: "0644"
+
+    - name: Add Jenkins repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/jenkins.list
+        content: |
+          deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/
+        mode: "0644"
+
+    - name: Install Jenkins without automatically starting it
+      ansible.builtin.apt:
+        name: jenkins
+        state: present
+        update_cache: true
+        policy_rc_d: 101
+
+    - name: Create Jenkins service override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/jenkins.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Configure Jenkins port and Java heap
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/jenkins.service.d/override.conf
+        mode: "0644"
+        content: |
+          [Service]
+          Environment="JENKINS_PORT=8081"
+          Environment="JENKINS_OPTS=--httpListenAddress=127.0.0.1"
+          Environment="JAVA_OPTS=-Djava.awt.headless=true -Xms256m -Xmx768m"
+      notify: Restart Jenkins
+
+    - name: Ensure Jenkins is running
+      ansible.builtin.systemd_service:
+        name: jenkins
+        daemon_reload: true
+        state: started
+        enabled: true
+
+    - name: Apply Jenkins configuration
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for Jenkins login page
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8081/login
+        status_code: 200
+      register: jenkins_response
+      until: jenkins_response.status | default(0) == 200
+      retries: 24
+      delay: 5
+
+  handlers:
+    - name: Restart Jenkins
+      ansible.builtin.systemd_service:
+        name: jenkins
+        state: restarted

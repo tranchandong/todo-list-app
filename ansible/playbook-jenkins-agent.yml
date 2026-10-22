@@ -1,0 +1,93 @@
+- name: Configure Jenkins agent
+  hosts: myhosts
+  become: true
+
+  tasks:
+    - name: Install ACL for privilege switching
+      ansible.builtin.apt:
+        name: acl
+        state: present
+        update_cache: true
+
+    - name: Create agent user
+      ansible.builtin.user:
+        name: jenkins-agent
+        home: /home/jenkins-agent
+        create_home: true
+        shell: /bin/bash
+        groups: docker
+        append: true
+      notify: Restart Jenkins agent
+
+    - name: Create agent configuration directory
+      ansible.builtin.file:
+        path: /etc/jenkins-agent
+        state: directory
+        owner: root
+        group: jenkins-agent
+        mode: "0750"
+
+    - name: Copy agent secret
+      ansible.builtin.copy:
+        src: files/jenkins-agent.secret
+        dest: /etc/jenkins-agent/secret
+        owner: jenkins-agent
+        group: jenkins-agent
+        mode: "0600"
+      no_log: true
+      notify: Restart Jenkins agent
+
+    - name: Download agent from Jenkins controller
+      ansible.builtin.get_url:
+        url: http://127.0.0.1:8081/jnlpJars/agent.jar
+        dest: /etc/jenkins-agent/agent.jar
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Jenkins agent
+
+    - name: Create agent service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/jenkins-agent.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Jenkins Todo Agent
+          Wants=network-online.target jenkins.service docker.service
+          After=network-online.target jenkins.service docker.service
+
+          [Service]
+          User=jenkins-agent
+          Group=jenkins-agent
+          SupplementaryGroups=docker
+          WorkingDirectory=/home/jenkins-agent
+          ExecStart=/usr/bin/java -Xms64m -Xmx256m -jar /etc/jenkins-agent/agent.jar -url http://127.0.0.1:8081/ -secret @/etc/jenkins-agent/secret -name todo-agent -webSocket -workDir /home/jenkins-agent
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart Jenkins agent
+
+    - name: Enable agent service
+      ansible.builtin.systemd_service:
+        name: jenkins-agent
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Apply agent changes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify Docker access
+      become_user: jenkins-agent
+      ansible.builtin.command:
+        cmd: docker ps
+      changed_when: false
+
+  handlers:
+    - name: Restart Jenkins agent
+      ansible.builtin.systemd_service:
+        name: jenkins-agent
+        daemon_reload: true
+        state: restarted

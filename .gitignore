@@ -37,3 +37,4 @@ crash.log
 *.key
 
 ansible/files/backend.env
+ansible/files/jenkins-agent.secret

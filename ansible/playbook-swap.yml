@@ -1,0 +1,45 @@
+- name: Configure swap
+  hosts: myhosts
+  become: true
+
+  tasks:
+    - name: Check swap file
+      ansible.builtin.stat:
+        path: /swapfile
+      register: swap_file
+
+    - name: Create and initialize swap file
+      when: not swap_file.stat.exists
+      block:
+        - name: Allocate 2GB swap file
+          ansible.builtin.command:
+            cmd: fallocate -l 2G /swapfile
+
+        - name: Set swap file permissions
+          ansible.builtin.file:
+            path: /swapfile
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Format swap file
+          ansible.builtin.command:
+            cmd: mkswap /swapfile
+
+    - name: Check active swap
+      ansible.builtin.command:
+        cmd: swapon --show=NAME --noheadings
+      register: active_swap
+      changed_when: false
+
+    - name: Enable swap
+      ansible.builtin.command:
+        cmd: swapon /swapfile
+      when: "'/swapfile' not in active_swap.stdout_lines"
+
+    - name: Enable swap after reboot
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^\s*/swapfile\s+'
+        line: "/swapfile none swap sw 0 0"
+        state: present
